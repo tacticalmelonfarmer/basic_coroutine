@@ -1,5 +1,5 @@
 # basic_coroutine
-This is a small header-only library aiming to make composing coroutine *types* much simpler. Implementing *future* semantics without implementing a
+This is a small template library aiming to make composing coroutine *types* much simpler. Implementing *future* semantics without implementing a
 `promise_type` or touching `std::coroutine_traits`. It is still very not production worthy and no tests exist yet but there are a
  few examples to showcase basic functionality.
  
