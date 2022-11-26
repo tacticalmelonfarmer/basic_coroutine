@@ -59,7 +59,7 @@ tmf::co_control on_yield(tmf::co_expect<int, int> ce)
 ```
 ### yielding nothing and expecting a value upon resume, as in: `co_yield tmf::co_expect<int>();`
 ```c++
-tmf::co_control on_yield(tmf::co_expect<int> ce)
+auto on_yield(tmf::co_expect<int> ce)
 {
   return tmf::co_control::suspend >> []() { return 42; };
 }
@@ -72,4 +72,22 @@ tmf::co_control on_yield()
   return tmf::co_control::suspend;
 }
 ```
+## on_await
+intercepts a `co_await` and can transform the result (type included) before giving it to the coroutine
+you can use 2 types of resumers and `co_expect` is required in the signature
+```c++
+auto on_await(tmf::co_expect<int>)
+{
+  return tmf::co_control::surrender >> []() { /*no return value and no parameters*/};
+}
+```
+the resumer can just be side effects, the resumer can be omitted if not needed
+```c++
+auto on_await(tmf::co_expect<int>)
+{
+  return tmf::co_control::surrender >> [](int n) { return n + 1; };
+}
+```
+resumers can also be a transform
 
+note: when awaiting and `tmf::co_control::surrender` is part of the return value, the coroutine does whatever the awaited object is doing
