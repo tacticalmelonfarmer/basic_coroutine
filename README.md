@@ -91,3 +91,17 @@ auto on_await(tmf::co_expect<int>)
 resumers can also be a transform
 
 note: when awaiting and `tmf::co_control::surrender` is part of the return value, the coroutine does whatever the awaited object is doing
+
+## executor
+to customize how a coroutine is executed you will use the executor callable member
+```c++
+template<typename F>
+void executor(F&& f)
+{
+  f();
+}
+```
+this is the default behaviour, just done manually
+anything can be used like threads, or a thread pool. making `my_coro_type` an awaiter type
+by implementing `await_ready`, `await_suspend` and `await_resume` and coordinating with the executor can give you context dependent executors
+such that only `co_await` operations inside a coroutine can spawn a new thread or vice-versa. sky's the limit
