@@ -44,7 +44,6 @@ Generator<int> iota(int begin, int end)
     {
       co_yield n++;
     }
-    co_return n++;
   }
   else
   {
@@ -52,8 +51,8 @@ Generator<int> iota(int begin, int end)
     {
       co_yield n--;
     }
-    co_return n--;
   }
+  co_return n;
 }
 
 Generator<int> fibonacci(bool& stop)

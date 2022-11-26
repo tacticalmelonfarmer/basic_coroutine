@@ -33,9 +33,15 @@ struct co_expect<Expected, void>
   using yielding_type = void;
 
   template<typename T>
-  constexpr static auto from(T value)
+  constexpr static auto from(T&& value)
   {
-    return co_expect<Expected, T>{ std::forward<T>(value) };
+    return co_expect<Expected, T&&>{ std::forward<T>(value) };
+  }
+
+  template<typename T>
+  constexpr static auto from(T* value)
+  {
+    return co_expect<Expected, T*>{ value };
   }
 };
 
@@ -444,11 +450,11 @@ yield_value(co_expect<Expecting, Yielding> e) requires
   requires(Future& f, Yielding y)
   {
     // 2-way yielding requires a co_resumer
-    { f.on_yield(co_expect<Expecting>::template from<Yielding>(y)) } -> Specializes<co_resumer>;
+    { f.on_yield(co_expect<Expecting>::from(y)) } -> Specializes<co_resumer>;
   }
 {
   auto lock = lock_future();
-  auto resumer = future().on_yield(std::move(co_expect<Expecting>::template from<Yielding>(e.from)));
+  auto resumer = future().on_yield(std::move(co_expect<Expecting>::from(static_cast<Yielding>(e.from))));
   return two_way_yield_awaiter_type<Expecting, Yielding, decltype(resumer)>
   { 
     this,
