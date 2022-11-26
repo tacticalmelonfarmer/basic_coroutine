@@ -101,7 +101,7 @@ void executor(F&& f)
   f();
 }
 ```
-this is the default behaviour, just done manually
-anything can be used like threads, or a thread pool. making `my_coro_type` an awaiter type
+this is the default behaviour, just done manually.
+anything can be used, like threads or a thread pool. making `my_coro_type` an [awaiter](https://en.cppreference.com/w/cpp/language/coroutines#co_await) type
 by implementing `await_ready`, `await_suspend` and `await_resume` and coordinating with the executor can give you context dependent executors
-such that only `co_await` operations inside a coroutine can spawn a new thread or the opposite. sky's the limit
+such that only `co_await` suspend/resume operations run synchronously. or coordinate with other handlers to affect execution. sky's the limit
