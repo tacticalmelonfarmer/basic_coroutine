@@ -65,7 +65,6 @@ auto on_yield(tmf::co_expect<int> ce)
 }
 ```
 ### yield with no input or output, as in: `co_yield tmf::nothing`
-### yielding a value and expecting a value upon resume, as in: `co_yield tmf::co_expect<int>::from(13);`
 ```c++
 tmf::co_control on_yield()
 {
