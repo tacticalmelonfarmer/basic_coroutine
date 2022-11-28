@@ -228,13 +228,14 @@ struct final_awaiter_type
   {
     return false;
   }
-  void await_suspend(std::coroutine_handle<> h) noexcept
+  void await_suspend(std::coroutine_handle<> handle) noexcept
   {
     auto lock = self->lock_future();
     self->deactivate();
     if (!self->has_future())
     {
-      h.destroy();
+      handle.destroy();
+      return;
     }
   }
   void await_resume() noexcept {}
@@ -308,34 +309,37 @@ struct yield_only_awaiter_type
   void await_suspend(std::coroutine_handle<> handle)
   {
     auto lock = self->lock_future();
+    self->deactivate();
     if (!self->has_future())
     {
-      throw std::runtime_error(
-        "[Error][Coroutine Promise][Yield-Only Awaiter]: missing future object"
-      );
+      handle.destroy();
+      return;
     }
-    self->deactivate();
     if constexpr (uses_executor())
     {
       if (is_resuming(resumer))
       {
-        self->future().executor(std::move([=]() { handle.resume(); }));
+        self->future().executor([=]() { handle.resume(); });
       }
     }
   }
   decltype(auto) await_resume()
   {
     auto lock = self->lock_future();
-    if (self->has_future()) {
+    if constexpr (Specializes<Resumer, co_resumer>)
+    {
+      if (!self->has_future()) {
+        throw std::runtime_error(
+          "[Error]@[Coroutine Promise][Yield-Only Awaiter]: missing future object"
+        );
+      }
       self->activate();
-      if constexpr (Specializes<Resumer, co_resumer>)
-        return resumer.on_resume();
-      else
-        return;
-    } else {
-      throw std::runtime_error(
-        "[Error]@[Coroutine Promise][Yield-Only Awaiter]: missing future object"
-      );
+      resumer.on_resume();
+      return;
+    }
+    else
+    {
+      return;
     }
   }
 };
@@ -413,13 +417,12 @@ struct two_way_yield_awaiter_type
   void await_suspend(std::coroutine_handle<> handle)
   {
     auto lock = self->lock_future();
+    self->deactivate();
     if (!self->has_future())
     {
-      throw std::runtime_error(
-        "[Error][Coroutine Promise][2-Way Yield Awaiter]: missing future object"
-      );
+      handle.destroy();
+      return;
     }
-    self->deactivate();
     if constexpr (uses_executor())
     {
       if (is_resuming(resumer))
@@ -431,14 +434,13 @@ struct two_way_yield_awaiter_type
   Expecting await_resume()
   {
     auto lock = self->lock_future();
-    if (self->has_future()) {
-      self->activate();
-      return resumer.on_resume();
-    } else {
+    if (!self->has_future()) {
       throw std::runtime_error(
-        "[Error][Coroutine Promise][2-Way Yield Awaiter]: missing future object"
+        "[Error]@[Coroutine Promise][2-Way Yield Awaiter]: missing future object"
       );
     }
+    self->activate();
+    return resumer.on_resume();
   }
 };
 // END 2-WAY YIELD AWAITER
@@ -500,13 +502,12 @@ struct void_yield_awaiter_type
   void await_suspend(std::coroutine_handle<> handle)
   {
     auto lock = self->lock_future();
+    self->deactivate();
     if (!self->has_future())
     {
-      throw std::runtime_error(
-        "[Error][Coroutine Promise][Void Yield Awaiter]: missing future object"
-      );
+      handle.destroy();
+      return;
     }
-    self->deactivate();
     if constexpr (uses_executor())
     {
       if (is_resuming(resumer))
@@ -518,14 +519,18 @@ struct void_yield_awaiter_type
   Expecting await_resume()
   {
     auto lock = self->lock_future();
-    if (self->has_future()) {
-      self->activate();
-      if constexpr (Specializes<Resumer, co_resumer>)
-        return resumer.on_resume();
-    } else {
+    if (!self->has_future()) {
       throw std::runtime_error(
         "[Error][Coroutine Promise][Void Yield Awaiter]: missing future object"
       );
+    }
+    self->activate();
+    if constexpr (Specializes<Resumer, co_resumer>)
+      return resumer.on_resume();
+    else
+    {
+      static_assert(std::is_same_v<Expecting, void>, "yield handler expects a value upon resume, implement a resumer");
+      return;
     }
   }
 };
@@ -587,33 +592,26 @@ struct transforming_awaiter
     if(self->awaiting())
       return false;
     if constexpr (has_await_wrapper<Recievable>()) {
-      auto lock = self->lock_future();
-      if (self->has_future()) {
-        bool is_resuming = wrapped.await_ready();
-        switch (co_control{ resumer }) {
-          case co_control::resume:
-            if (!is_resuming)
-            {
-              // footgun check
-              throw std::runtime_error(
-                "[Error][Coroutine Promise][Transforming Awaiter]: attempting to override-resume a co_awaiting coroutine is dangerous"
-                ", only override-suspend is permitted for co_await operations"
-              );
-            }
-            return true;
-            break;
-          case co_control::suspend:
-            return false;
-            break;
-          case co_control::surrender:
-          default:
-            return is_resuming;
-            break;
-        }
-      } else {
-        throw std::runtime_error(
-          "[Error][Coroutine Promise][Transforming Awaiter]: missing future object"
-        );
+      bool is_resuming = wrapped.await_ready(); // what is returned by the awaited object
+      switch (co_control{ resumer }) { // what was returned by the `Future::on_await` callable
+        case co_control::resume:
+          if (!is_resuming)
+          {
+            // footgun check
+            throw std::runtime_error(
+              "[Error]@[Coroutine Promise][Transforming Awaiter]: attempting to override-resume a co_awaiting coroutine is dangerous"
+              ", only override-suspend is permitted for co_await operations"
+            );
+          }
+          return true;
+          break;
+        case co_control::suspend:
+          return false;
+          break;
+        case co_control::surrender:
+        default:
+          return is_resuming;
+          break;
       }
     } else {
       return wrapped.await_ready();
@@ -624,6 +622,8 @@ struct transforming_awaiter
     using ST = decltype(wrapped.await_suspend(handle));
     if(self->awaiting())
     {
+      // here we have encountered a double await, which should not be an error
+      // instead it is a no-op to facilitate the act of waiting for the previously started operation to finish
       if constexpr (Specializes<ST, std::coroutine_handle>)
       {
         return static_cast<std::coroutine_handle<>>(std::noop_coroutine()); // thank you for this helper function!
@@ -634,15 +634,22 @@ struct transforming_awaiter
       }
       else
       {
+        return;
       }
     }
     else
     {
+      // an await operation is semantically different from a yield operation
+      // yielding communicates with the caller of the coroutine
+      // awaiting communicates with the object being awaited on
+      // so when you await something it temporarily takes control away from the coroutine future object
+      // and gives it to the awaited object, it is the awaited objects responsibility to resume eventually
+      // `std::coroutine_handle`s are copyable but it is dangerous to double-resume from the raw handle
+      // use it once and dispose of it
       self->deactivate();
       self->await_value();
       if constexpr (Specializes<ST, std::coroutine_handle>)
       {
-        // the next resume must come from `handle` (or copy of) directly, othwerwise it will be unresumable
         return static_cast<std::coroutine_handle<>>(wrapped.await_suspend(handle));
       }
       else if constexpr (std::convertible_to<ST, bool>)
@@ -688,8 +695,15 @@ await_transform(U&& awaitable) requires GlobalAwaitable<U>
   auto&& awaiter = operator co_await(std::forward<U>(awaitable));
   using Recievable = decltype(awaiter.await_resume());
   using Awaiter = decltype(awaiter);
-  auto resumer = future().on_await(co_expect<Recievable>{});
-  return transforming_awaiter<Recievable, Awaiter, decltype(resumer)>{ this, static_cast<Awaiter>(awaiter), std::move(resumer) };
+  if constexpr (has_await_wrapper<Recievable>())
+  {
+    auto resumer = future().on_await(co_expect<Recievable>{});
+    return transforming_awaiter<Recievable, Awaiter, decltype(resumer)>{ this, static_cast<Awaiter>(awaiter), std::move(resumer) };
+  }
+  else
+  {
+    return transforming_awaiter<Recievable, Awaiter, co_control>{ this, static_cast<Awaiter>(awaiter), co_control::surrender };
+  }
 }
 
 template<typename U>
@@ -699,13 +713,20 @@ await_transform(U&& awaitable) requires LocalAwaitable<U>
   auto&& awaiter = awaitable.operator co_await();
   using Recievable = decltype(awaiter.await_resume());
   using Awaiter = decltype(awaiter);
-  auto resumer = future().on_await(co_expect<Recievable>{});
-  return transforming_awaiter<Recievable, Awaiter, decltype(resumer)>{ this, static_cast<Awaiter>(awaiter), std::move(resumer) };
+  if constexpr (has_await_wrapper<Recievable>())
+  {
+    auto resumer = future().on_await(co_expect<Recievable>{});
+    return transforming_awaiter<Recievable, Awaiter, decltype(resumer)>{ this, static_cast<Awaiter>(awaiter), std::move(resumer) };
+  }
+  else
+  {
+    return transforming_awaiter<Recievable, Awaiter, co_control>{ this, static_cast<Awaiter>(awaiter), co_control::surrender };
+  }
 }
 
 template<typename U>
 auto
-await_transform(U&& awaiter)// requires BasicAwaiter<U>
+await_transform(U&& awaiter) requires BasicAwaiter<U>
 {
   using Recievable = decltype(awaiter.await_resume());
   if constexpr (has_await_wrapper<Recievable>())

@@ -33,7 +33,7 @@ template<typename T>
 concept BasicAwaiter = requires(T v)
 {
   { v.await_ready() } -> std::convertible_to<bool>;
-  { v.await_suspend() } -> IsOneOf<void, bool, std::coroutine_handle<>>;
+  { v.await_suspend(std::coroutine_handle<>{}) } -> ToOneOf<void, bool, std::coroutine_handle<>>;
   v.await_resume();
 };
 
