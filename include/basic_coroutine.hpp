@@ -72,7 +72,7 @@ public:
     return m_handle.promise().awaiting();
   }
 
-  // resume the coroutine, if `active() == false` and `done() == false`
+  // resume the coroutine, if not returned from, and if not busy
   [[nodiscard]] bool resume()
   {
     if(done() || active() || awaiting())
